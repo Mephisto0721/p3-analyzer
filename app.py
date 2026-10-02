@@ -224,3 +224,4 @@ if st.button("生成 5 注号码"):
         st.dataframe(res_df, use_container_width=True, hide_index=True)
     else:
         st.warning("没有生成符合条件的号码，请放宽过滤条件（如和值范围、跨度范围）后重试。")
+st.caption("⚠️ 本工具仅供个人学习与娱乐，所有数据来源于公开网络，不构成任何购彩建议，不保证预测准确，请理性购彩。")
