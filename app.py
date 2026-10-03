@@ -126,11 +126,15 @@ st.dataframe(
     use_container_width=True
 )
 # ==========================================
-# 新增：智能选号与预测模块
+# 新增：智能选号与预测模块（支持125注与历史记录）
 # ==========================================
 st.markdown("---")
 st.header("🎯 智能选号辅助 (仅供娱乐)")
 st.caption("注意：彩票开奖是独立随机事件，以下号码仅由历史数据统计生成，不代表预测结果，请理性对待。")
+
+# 初始化 Session State，用于保存历史记录
+if 'history_records' not in st.session_state:
+    st.session_state.history_records = []
 
 # 1. 定义选号策略
 strategy = st.selectbox(
@@ -148,17 +152,14 @@ with col_f3:
     exclude_shape = st.multiselect("排除形态", ["豹子", "组三", "组六"], default=[])
 
 # 3. 生成号码的逻辑
-if st.button("生成 5 注号码"):
+if st.button("生成 125 注号码"):
     # 计算近30期的热号（按位置）
     recent_df = df.tail(30)
     
-    # 获取每个位置的冷热号（0-9）
     hot_d1 = recent_df['d1'].value_counts().idxmax()
     hot_d2 = recent_df['d2'].value_counts().idxmax()
     hot_d3 = recent_df['d3'].value_counts().idxmax()
     
-    # 获取每个位置的冷号（遗漏最久的）
-    # 复用你之前的遗漏计算函数
     om_d1 = calc_omission(df['d1'])
     om_d2 = calc_omission(df['d2'])
     om_d3 = calc_omission(df['d3'])
@@ -169,30 +170,31 @@ if st.button("生成 5 注号码"):
 
     generated = []
     attempts = 0
-    max_attempts = 10000 # 防止死循环
+    max_attempts = 200000 # 提高尝试上限，防止生成125注时因条件太严苛而卡死
     
-    while len(generated) < 5 and attempts < max_attempts:
+    while len(generated) < 125 and attempts < max_attempts:
         attempts += 1
         import random
         
         if strategy == "冷热结合（推荐）":
-            # 百位用热号，十位用冷号，个位随机
             n1 = hot_d1 if random.random() > 0.3 else random.randint(0, 9)
             n2 = cold_d2 if random.random() > 0.3 else random.randint(0, 9)
             n3 = random.randint(0, 9)
         elif strategy == "追热号（近期高频）":
-            n1, n2, n3 = hot_d1, hot_d2, hot_d3
+            n1 = hot_d1 if random.random() > 0.5 else random.randint(0, 9)
+            n2 = hot_d2 if random.random() > 0.5 else random.randint(0, 9)
+            n3 = hot_d3 if random.random() > 0.5 else random.randint(0, 9)
         elif strategy == "守冷号（遗漏最长）":
-            n1, n2, n3 = cold_d1, cold_d2, cold_d3
+            n1 = cold_d1 if random.random() > 0.5 else random.randint(0, 9)
+            n2 = cold_d2 if random.random() > 0.5 else random.randint(0, 9)
+            n3 = cold_d3 if random.random() > 0.5 else random.randint(0, 9)
         else:
             n1, n2, n3 = random.randint(0, 9), random.randint(0, 9), random.randint(0, 9)
             
-        # 构造号码并计算属性
         num_str = f"{n1}{n2}{n3}"
         s_val = n1 + n2 + n3
         sp_val = max(n1, n2, n3) - min(n1, n2, n3)
         
-        # 判断形态
         if len(set([n1, n2, n3])) == 1:
             shape_val = "豹子"
         elif len(set([n1, n2, n3])) == 2:
@@ -200,7 +202,6 @@ if st.button("生成 5 注号码"):
         else:
             shape_val = "组六"
             
-        # 过滤条件
         if not (sum_range[0] <= s_val <= sum_range[1]):
             continue
         if not (span_range[0] <= sp_val <= span_range[1]):
@@ -208,7 +209,6 @@ if st.button("生成 5 注号码"):
         if shape_val in exclude_shape:
             continue
             
-        # 去重
         if num_str not in [g['号码'] for g in generated]:
             generated.append({
                 "号码": num_str,
@@ -219,9 +219,38 @@ if st.button("生成 5 注号码"):
             })
 
     if generated:
-        res_df = pd.DataFrame(generated)
-        st.success(f"根据策略【{strategy}】为你生成了 {len(res_df)} 注号码：")
-        st.dataframe(res_df, use_container_width=True, hide_index=True)
+        # 将本次生成的 125 注存入历史记录
+        st.session_state.history_records.extend(generated)
+        st.success(f"根据策略【{strategy}】为你生成了 {len(generated)} 注号码，已自动存入历史记录！")
     else:
         st.warning("没有生成符合条件的号码，请放宽过滤条件（如和值范围、跨度范围）后重试。")
+
+# 4. 展示历史生成记录
+if st.session_state.history_records:
+    st.markdown("---")
+    st.subheader("📋 历史生成记录")
+    
+    hist_df = pd.DataFrame(st.session_state.history_records)
+    
+    # 用选项卡分开显示，方便查看
+    tab1, tab2 = st.tabs(["当前历史列表", "下载/清空"])
+    
+    with tab1:
+        st.dataframe(hist_df, use_container_width=True, hide_index=True)
+        
+    with tab2:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            # 提供 CSV 下载按钮
+            csv_data = hist_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 下载历史记录为 CSV",
+                data=csv_data,
+                file_name="p3_generated_history.csv",
+                mime="text/csv"
+            )
+        with col_b:
+            if st.button("🗑️ 清空历史记录"):
+                st.session_state.history_records = []
+                st.rerun() # 清空后立即刷新页面
 st.caption("⚠️ 本工具仅供个人学习与娱乐，所有数据来源于公开网络，不构成任何购彩建议，不保证预测准确，请理性购彩。")
