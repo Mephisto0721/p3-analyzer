@@ -235,8 +235,15 @@ if st.session_state.history_records:
     # 用选项卡分开显示，方便查看
     tab1, tab2 = st.tabs(["当前历史列表", "下载/清空"])
     
-    with tab1:
-        st.dataframe(hist_df, use_container_width=True, hide_index=True)
+with tab1:
+    st.dataframe(hist_df, use_container_width=True, hide_index=True)
+    
+    # 新增：把号码拼成一整段文本
+    all_numbers = " ".join(hist_df['号码'].astype(str).tolist())
+    
+    # 新增：用 st.code 展示，自带一键复制按钮（手机端也能长按复制）
+    st.markdown("**👇 长按下方文本框，即可一键复制全部号码：**")
+    st.code(all_numbers, language=None)
         
     with tab2:
         col_a, col_b = st.columns(2)
