@@ -9,6 +9,11 @@ existing_df = None
 if os.path.exists(file_path):
     try:
         existing_df = pd.read_csv(file_path, dtype={'issue': str})
+        # 兼容历史数据：把残留的 5 位期号也补成 7 位，避免同一期出现两种写法
+        existing_df['issue'] = (
+            existing_df['issue'].astype(str).str.strip()
+            .apply(lambda s: '20' + s if len(s) == 5 else s)
+        )
         print(f"✅ 发现本地已有 {len(existing_df)} 期数据，将进行增量拼接。")
     except Exception as e:
         print(f"⚠️ 读取本地数据失败，将重新抓取。错误：{e}")
@@ -33,7 +38,10 @@ try:
     
     records = []
     for item in data_list:
-        issue = str(item['lotteryDrawNum'])
+        issue = str(item['lotteryDrawNum']).strip()
+        # 期号归一化：官方 API 有时返回 5 位（YYNNN），统一补成 7 位（YYYYNNN）
+        if len(issue) == 5:
+            issue = '20' + issue
         date = item['lotteryDrawTime']
         numbers = item['lotteryDrawResult'] # 格式如 "1 2 3"
         
