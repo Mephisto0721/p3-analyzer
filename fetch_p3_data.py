@@ -62,3 +62,6 @@ try:
 
 except Exception as e:
     print(f"\n❌ 抓取失败，错误信息：{e}")
+    # 【关键修改】：主动抛出异常，让 GitHub Actions 报错变红！
+    import sys
+    sys.exit(1)
