@@ -126,15 +126,59 @@ st.dataframe(
     use_container_width=True
 )
 # ==========================================
-# 新增：智能选号与预测模块（支持125注与历史记录）
+# 智能选号与预测模块（复式：27 / 64 / 125 注）
 # ==========================================
 st.markdown("---")
 st.header("🎯 智能选号辅助 (仅供娱乐)")
 st.caption("注意：彩票开奖是独立随机事件，以下号码仅由历史数据统计生成，不代表预测结果，请理性对待。")
 
-# 初始化 Session State，用于保存历史记录
-if 'history_records' not in st.session_state:
-    st.session_state.history_records = []
+import random
+from itertools import product
+
+for _k, _v in (
+    ("history_records", []),
+    ("last_batch", []),
+    ("last_batch_info", {}),
+):
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+
+def pick_position_numbers(count, series, recent_df, col, strategy):
+    """给某个位置挑 count 个候选号（0-9）。
+
+    热号 = 近 30 期出现次数多；冷号 = 当前遗漏长。
+    """
+    freq = recent_df[col].value_counts()
+    hot_order = [int(x) for x in freq.index]
+    hot_order += [i for i in range(10) if i not in hot_order]
+
+    om = calc_omission(series)
+    cold_order = sorted(om, key=lambda k: (-om[k], k))
+
+    if strategy == "追热号（近期高频）":
+        picked = hot_order[:count]
+    elif strategy == "守冷号（遗漏最长）":
+        picked = cold_order[:count]
+    elif strategy == "冷热结合（推荐）":
+        picked = hot_order[: (count + 1) // 2]
+        for x in cold_order:
+            if len(picked) >= count:
+                break
+            if x not in picked:
+                picked.append(x)
+    else:
+        picked = random.sample(range(10), count)
+
+    # 补足兜底（理论上不会缺）
+    for i in hot_order:
+        if len(picked) >= count:
+            break
+        if i not in picked:
+            picked.append(i)
+
+    return sorted(int(x) for x in picked[:count])
+
 
 # 1. 定义选号策略
 strategy = st.selectbox(
@@ -151,113 +195,125 @@ with col_f2:
 with col_f3:
     exclude_shape = st.multiselect("排除形态", ["豹子", "组三", "组六"], default=[])
 
-# 3. 生成号码的逻辑
-if st.button("生成 125 注号码"):
-    # 计算近30期的热号（按位置）
-    recent_df = df.tail(30)
-    
-    hot_d1 = recent_df['d1'].value_counts().idxmax()
-    hot_d2 = recent_df['d2'].value_counts().idxmax()
-    hot_d3 = recent_df['d3'].value_counts().idxmax()
-    
-    om_d1 = calc_omission(df['d1'])
-    om_d2 = calc_omission(df['d2'])
-    om_d3 = calc_omission(df['d3'])
-    
-    cold_d1 = max(om_d1, key=om_d1.get)
-    cold_d2 = max(om_d2, key=om_d2.get)
-    cold_d3 = max(om_d3, key=om_d3.get)
+# 3. 复式规模：每个位置选 n 个号，展开 n×n×n 注
+st.markdown("**复式规模**：每个位置选 n 个号，展开后是 n×n×n 注")
+b1, b2, b3 = st.columns(3)
+target_n = None
+with b1:
+    if st.button("27 注（3×3×3）", use_container_width=True):
+        target_n = 3
+with b2:
+    if st.button("64 注（4×4×4）", use_container_width=True):
+        target_n = 4
+with b3:
+    if st.button("125 注（5×5×5）", use_container_width=True):
+        target_n = 5
 
+if target_n:
+    recent_df = df.tail(30)
+    picked_nums = {
+        "d1": pick_position_numbers(target_n, df["d1"], recent_df, "d1", strategy),
+        "d2": pick_position_numbers(target_n, df["d2"], recent_df, "d2", strategy),
+        "d3": pick_position_numbers(target_n, df["d3"], recent_df, "d3", strategy),
+    }
+
+    all_combos = list(
+        product(picked_nums["d1"], picked_nums["d2"], picked_nums["d3"])
+    )
     generated = []
-    attempts = 0
-    max_attempts = 200000 # 提高尝试上限，防止生成125注时因条件太严苛而卡死
-    
-    while len(generated) < 125 and attempts < max_attempts:
-        attempts += 1
-        import random
-        
-        if strategy == "冷热结合（推荐）":
-            n1 = hot_d1 if random.random() > 0.3 else random.randint(0, 9)
-            n2 = cold_d2 if random.random() > 0.3 else random.randint(0, 9)
-            n3 = random.randint(0, 9)
-        elif strategy == "追热号（近期高频）":
-            n1 = hot_d1 if random.random() > 0.5 else random.randint(0, 9)
-            n2 = hot_d2 if random.random() > 0.5 else random.randint(0, 9)
-            n3 = hot_d3 if random.random() > 0.5 else random.randint(0, 9)
-        elif strategy == "守冷号（遗漏最长）":
-            n1 = cold_d1 if random.random() > 0.5 else random.randint(0, 9)
-            n2 = cold_d2 if random.random() > 0.5 else random.randint(0, 9)
-            n3 = cold_d3 if random.random() > 0.5 else random.randint(0, 9)
-        else:
-            n1, n2, n3 = random.randint(0, 9), random.randint(0, 9), random.randint(0, 9)
-            
-        num_str = f"{n1}{n2}{n3}"
+    for n1, n2, n3 in all_combos:
         s_val = n1 + n2 + n3
         sp_val = max(n1, n2, n3) - min(n1, n2, n3)
-        
-        if len(set([n1, n2, n3])) == 1:
+
+        if len({n1, n2, n3}) == 1:
             shape_val = "豹子"
-        elif len(set([n1, n2, n3])) == 2:
+        elif len({n1, n2, n3}) == 2:
             shape_val = "组三"
         else:
             shape_val = "组六"
-            
+
         if not (sum_range[0] <= s_val <= sum_range[1]):
             continue
         if not (span_range[0] <= sp_val <= span_range[1]):
             continue
         if shape_val in exclude_shape:
             continue
-            
-        if num_str not in [g['号码'] for g in generated]:
-            generated.append({
-                "号码": num_str,
-                "和值": s_val,
-                "跨度": sp_val,
-                "形态": shape_val,
-                "策略": strategy
-            })
 
+        generated.append({
+            "号码": f"{n1}{n2}{n3}",
+            "和值": s_val,
+            "跨度": sp_val,
+            "形态": shape_val,
+            "策略": strategy,
+        })
+
+    st.session_state.last_batch = generated
+    st.session_state.last_batch_info = {
+        "n": target_n,
+        "nums": picked_nums,
+        "total": len(all_combos),
+    }
     if generated:
-        # 将本次生成的 125 注存入历史记录
         st.session_state.history_records.extend(generated)
-        st.success(f"根据策略【{strategy}】为你生成了 {len(generated)} 注号码，已自动存入历史记录！")
-    else:
-        st.warning("没有生成符合条件的号码，请放宽过滤条件（如和值范围、跨度范围）后重试。")
 
-# 4. 展示历史生成记录
+# 4. 展示本批结果
+_batch = st.session_state.get("last_batch") or []
+_info = st.session_state.get("last_batch_info") or {}
+
+if _batch and _info:
+    _n = _info["n"]
+    _total = _info["total"]
+    _kept = len(_batch)
+    _nums = _info["nums"]
+
+    st.markdown(
+        f"**本次 {_n}×{_n}×{_n}**　百位 {_nums['d1']} ｜ 十位 {_nums['d2']} ｜ 个位 {_nums['d3']}"
+    )
+    if _kept == _total:
+        st.success(f"展开 {_total} 注，过滤后全部保留。")
+    elif _kept:
+        st.warning(
+            f"展开 {_total} 注，按和值/跨度/形态过滤掉 {_total - _kept} 注，剩 {_kept} 注。"
+        )
+    else:
+        st.error("全部被过滤掉了，放宽和值/跨度范围再试。")
+
+    if _kept:
+        st.dataframe(
+            pd.DataFrame(_batch), use_container_width=True, hide_index=True
+        )
+
+        _numbers = " ".join(row["号码"] for row in _batch)
+        st.markdown("**👇 本批号码（点右上角复制，只有号码）**")
+        st.code(_numbers, language=None)
+
+# 5. 展示历史生成记录
 if st.session_state.history_records:
     st.markdown("---")
     st.subheader("📋 历史生成记录")
-    
+
     hist_df = pd.DataFrame(st.session_state.history_records)
-    
-    # 用选项卡分开显示，方便查看
+
     tab1, tab2 = st.tabs(["当前历史列表", "下载/清空"])
-    
+
     with tab1:
         st.dataframe(hist_df, use_container_width=True, hide_index=True)
-        
-        # 新增：把号码拼成一整段文本
-        all_numbers = " ".join(hist_df['号码'].astype(str).tolist())
-        
-        # 新增：用 st.code 展示，自带一键复制按钮（手机端也能长按复制）
-        st.markdown("**👇 长按下方文本框，即可一键复制全部号码：**")
-        st.code(all_numbers, language=None)
-        
+
     with tab2:
         col_a, col_b = st.columns(2)
         with col_a:
-            # 提供 CSV 下载按钮
-            csv_data = hist_df.to_csv(index=False).encode('utf-8-sig')
+            csv_data = hist_df.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 label="📥 下载历史记录为 CSV",
                 data=csv_data,
                 file_name="p3_generated_history.csv",
-                mime="text/csv"
+                mime="text/csv",
             )
         with col_b:
             if st.button("🗑️ 清空历史记录"):
                 st.session_state.history_records = []
-                st.rerun() # 清空后立即刷新页面
+                st.session_state.last_batch = []
+                st.session_state.last_batch_info = {}
+                st.rerun()
+
 st.caption("⚠️ 本工具仅供个人学习与娱乐，所有数据来源于公开网络，不构成任何购彩建议，不保证预测准确，请理性购彩。")
